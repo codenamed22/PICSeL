@@ -1,0 +1,6 @@
+@PICSeL_HostAddress = http://localhost:5041
+
+GET {{PICSeL_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
