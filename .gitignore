@@ -361,3 +361,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+/PICSeL/Old
+/PICSeL/1e668a0c-b92a-422b-950f-b807f013f853.mp4_side_by_side.mp4
+/PICSeL/5ea8361e-e8dc-4675-96ea-b1238d725bc2.mp4_side_by_side.mp4
+/PICSeL/a0c8462c-ca55-449f-84d3-e09d4b3928e0.mp4_side_by_side.mp4
