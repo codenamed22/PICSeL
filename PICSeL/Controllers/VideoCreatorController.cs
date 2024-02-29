@@ -24,19 +24,9 @@ namespace PICSeL.Controllers
         }
 
         [HttpGet("GetVideoForTopic")]
-        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName, bool isQuery=false) 
+        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName)
         {
-            string script;
-
-            if (isQuery)
-            {
-                script = _azureAIHelper.GetQueryAnswer(topicName);
-            }
-            else
-            {
-                script = _azureAIHelper.GetVideoScript(topicName);
-            }
-
+            var script = _azureAIHelper.GetVideoScript(topicName);
             var ssml = _azureAIHelper.GetSSMLFromScript(script);
             ssml = ssml.Replace("```", "");
 
@@ -62,26 +52,6 @@ namespace PICSeL.Controllers
                 }
             }
 
-            throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
-        }
-
-        [HttpGet("GetTextAnswerForQuery")]
-        public async Task<string> GetTextAnswerForQuery(string query, string targetLocale = "", string sourceLocale ="en-US")
-        {
-            try
-            {
-                var script = _azureAIHelper.GetQueryAnswer(query);
-                //Convert it to desired locale
-                if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en")
-                    script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale, sourceLocale);
-
-                return script;
-            }
-            catch (Exception e)
-            {
-                throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
-            }
-            
             throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
 
@@ -139,6 +109,59 @@ namespace PICSeL.Controllers
                 }
             }
 
+            throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
+        }
+
+        [HttpGet("GetVideoForQuery")]
+        public async Task<VideoContentResponse> GetVideoForQuery([FromQuery] string query) 
+        {
+            var script = _azureAIHelper.GetQueryAnswer(query);
+
+            var ssml = _azureAIHelper.GetSSMLFromScript(script);
+            ssml = ssml.Replace("```", "");
+
+            var jobId = await _azureSpeechHelper.SubmitSynthesisAsync(ssml);
+            if (!string.IsNullOrEmpty(jobId))
+            {
+                while (true)
+                {
+                    var jobResponse = await _azureSpeechHelper.GetSynthesisAsync(jobId);
+                    if (jobResponse.Status == "Succeeded")
+                    {
+                        return jobResponse;
+                    }
+                    if (jobResponse.Status == "Failed")
+                    {
+                        throw new HttpRequestException($"Batch avatar synthesis job failed");
+                    }
+                    else
+                    {
+                        _logger.LogTrace($"Batch avatar synthesis job is still running, status");
+                        await Task.Delay(5000); // Wait for 5 seconds before polling again
+                    }
+                }
+            }
+
+            throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
+        }
+
+        [HttpGet("GetTextAnswerForQuery")]
+        public async Task<string> GetTextAnswerForQuery(string query, string targetLocale = "", string sourceLocale ="en-US")
+        {
+            try
+            {
+                var script = _azureAIHelper.GetQueryAnswer(query);
+                //Convert it to desired locale
+                if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en")
+                    script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale, sourceLocale);
+
+                return script;
+            }
+            catch (Exception e)
+            {
+                throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
+            }
+            
             throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
     }
