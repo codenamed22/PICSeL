@@ -23,7 +23,7 @@ namespace PICSeL.Utils
             return GetResponseFromOpenAI(message, createSummarizeRequest, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        public string GetVideoScript(string message, bool isQuery = false)
+        public string GetVideoScript(string message)
         {
             return GetResponseFromOpenAI(message, CreateVideoScript, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
