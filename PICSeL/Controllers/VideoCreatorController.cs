@@ -31,13 +31,28 @@ namespace PICSeL.Controllers
         }
 
         [HttpGet("GetVideoForTopic")]
-        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName) 
+        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName, bool isQuery=false) 
         {
             await createScriptAndVideoAsync(topicName);
-
+            var ssml = _azureAIHelper.GetSSMLFromScript(script);
             return new VideoContentResponse();
-
+                    if (jobResponse.Status == "Succeeded")
             //throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
+        }
+
+        [HttpGet("GetAnswerForQuery")]
+        public async Task<VideoContentResponse> GetAnswerForQuery([FromQuery] string query)
+        {
+            var script = _azureAIHelper.GetAnswerForQuery(query);
+                    else
+                    {
+                        _logger.LogTrace($"Batch avatar synthesis job is still running, status");
+                        await Task.Delay(5000); // Wait for 5 seconds before polling again
+                    }
+                }
+            }
+
+            throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
 
         [HttpGet("GetAnswerForQuery")]
@@ -68,18 +83,19 @@ namespace PICSeL.Controllers
                     }
                 }
             }
+
             throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
 
         [HttpGet("GetTextAnswerForQuery")]
-        public async Task<string> GetTextAnswerForQuery(string query, string targetLocale = "")
+        public async Task<string> GetTextAnswerForQuery(string query, string targetLocale = "", string sourceLocale ="en-US")
         {
             try
             {
-                var script = _azureAIHelper.GetAnswerForQuery(query);
+                var script = _azureAIHelper.GetQueryAnswer(query);
                 //Convert it to desired locale
                 if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en")
-                    script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale);
+                    script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale, sourceLocale);
 
                 return script;
             }

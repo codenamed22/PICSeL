@@ -33,14 +33,14 @@ namespace PICSeL.Utils
             return GetResponseFromOpenAI(message, CreateSSMLRequest, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        public string GetAnswerForQuery(string query)
+        public string GetQueryAnswer(string query)
         {
             return GetResponseFromOpenAI(query, createQueryRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        public string GetLocalizedAnswerForQuery(string query, string targetLocale)
+        public string GetLocalizedAnswerForQuery(string query, string targetLocale, string sourceLocale)
         {
-            query = $"Translate the following English text to {targetLocale}: \"{query}\"'}}";
+            query = $"Translate the following {sourceLocale} text to {targetLocale}: \"{query}\"'}}";
             return GetResponseFromOpenAI(query, createLocalizedQueryRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
@@ -183,7 +183,7 @@ namespace PICSeL.Utils
                         new Message
                         {
                             role = "system",
-                            content = "You are an assistant content editor. Your responsibility is to summarize answer in a way that can help the creator create a short content video of around 0-2 minutes from your response."
+                            content = "You are an assistant content editor. Your responsibility is to summarize answer in a way that can help the creator create a short content video of around 0-1 minute from your response."
                         },
                         new Message
                         {
