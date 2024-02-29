@@ -23,7 +23,7 @@ namespace PICSeL.Utils
             return GetResponseFromOpenAI(message, createSummarizeRequest, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        public string GetVideoScript(string message, string lang = "EN")
+        public string GetVideoScript(string message, bool isQuery = false)
         {
             return GetResponseFromOpenAI(message, CreateVideoScript, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
@@ -33,7 +33,12 @@ namespace PICSeL.Utils
             return GetResponseFromOpenAI(message, CreateSSMLRequest, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        private OpenAIResponse? GetResponseFromOpenAI(string content, Func<string, string, string> getPrompt, string lang = "EN")
+        public string GetAnswerForQuery(string query)
+        {
+            return GetResponseFromOpenAI(query, createQueryRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
+        }
+
+        private OpenAIResponse? GetResponseFromOpenAI(string content, Func<string, string> getPrompt)
         { 
             try
             {
@@ -155,7 +160,37 @@ namespace PICSeL.Utils
             return JsonConvert.SerializeObject(aiRequest);
         }
 
-        private static string CreateSSMLRequest(string script, string lang = "EN")
+        private static string createQueryRequest(string query)
+        {
+
+            OpenAIRequest aiRequest = new OpenAIRequest
+            {
+                temperature = 0.5,
+                top_p = 0.5,
+                frequency_penalty = 0.3,
+                presence_penalty = 0.3,
+                max_tokens = 4096,
+                stop = null,
+                stream = false,
+                messages = new List<Message>
+                    {
+                        new Message
+                        {
+                            role = "system",
+                            content = "You are an assistant content editor. Your responsibility is to summarize answer in a way that can help the creator create a short content video of around 0-2 minutes from your response."
+                        },
+                        new Message
+                        {
+                            role = "user",
+                            content = query
+                        },
+                    }
+            };
+
+            return JsonConvert.SerializeObject(aiRequest);
+        }
+
+        private static string CreateSSMLRequest(string script)
         {
             var trainingScript1 = "Solar Flares: Unveiling the Power of Our Sun\r\n[Scene 1: Introduction to the Sun]\r\nWelcome to our exploration of solar flares, the Sun's most captivating phenomena. The Sun, a ball of hot plasma and the heart of our solar system, is not just a source of light and warmth; it's a dynamic and turbulent star, capable of releasing incredible amounts of energy in the form of solar flares.\r\n\r\n[Cut to visual: Time-lapse of the Sun with visible solar activities]\r\nImagine watching the Sun's surface, witnessing an intense brightening, a burst of light that outshines the surrounding areas. This is the beginning of a solar flare, a spectacular display of the Sun's power.\r\n\r\n[Scene 2: What are Solar Flares?]\r\nSolar flares are sudden eruptions of energy on the Sun's surface. They result from the tangling, crossing, or reorganizing of magnetic field lines near sunspots. The energy released can be equivalent to millions of 100-megaton hydrogen bombs exploding at the same time.\r\n\r\n[Cut to visual: Animation showing magnetic field lines tangling and releasing a flare]\r\nAs these magnetic fields snap and realign, they release a massive amount of energy in the form of light, heat, and a stream of highly energetic particles. This process is what we observe as a solar flare.\r\n\r\n[Scene 3: The Impact of Solar Flares]\r\nSolar flares can have profound effects on Earth. The intense light and energetic particles can disrupt satellite operations, communication systems, and even power grids. They also contribute to the awe-inspiring natural light show known as the auroras, more commonly known as the Northern and Southern Lights.\r\n\r\n[Cut to visual: Satellite in space experiencing interference, followed by footage of auroras]\r\nThe charged particles can ionize Earth's atmosphere, interfering with radio communications and navigation systems. Meanwhile, the beauty of the auroras is a direct result of these particles colliding with molecules in Earth's atmosphere, a serene reminder of our Sun's influence.\r\n\r\n[Scene 4: Observing and Predicting Solar Flares]\r\nThanks to advancements in technology, astronomers can now observe solar flares in unprecedented detail. Satellites like the Solar Dynamics Observatory (SDO) provide real-time data on the Sun's activity, helping scientists predict when and where solar flares might occur.\r\n\r\n[Cut to visual: Footage from the Solar Dynamics Observatory, showing solar flares]\r\nThis information is crucial for mitigating the potential impacts on Earth's technological infrastructure, allowing us to prepare and protect our satellites and power systems from the disruptive effects of these solar phenomena.\r\n\r\n[Scene 5: Conclusion]\r\nSolar flares are a testament to the Sun's incredible power and its dynamic nature. As we continue to study these magnificent events, we not only gain insight into our own star but also the workings of stars throughout the universe.\r\n\r\n[Cut to visual: Pan out from the Sun into the star-filled night sky]\r\nUnderstanding solar flares is not just about safeguarding our technology; it's about deepening our connection to the cosmos, reminding us of the intricate dance between energy, matter, and life itself.\r\n\r\nThank you for joining us on this journey through the fiery heart of our solar system. Until next time, keep looking up, and marvel at the wonders of the universe that surrounds us.";
 
