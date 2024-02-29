@@ -38,6 +38,12 @@ namespace PICSeL.Utils
             return GetResponseFromOpenAI(query, createQueryRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
+        public string GetLocalizedAnswerForQuery(string query, string targetLocale)
+        {
+            query = $"Translate the following English text to {targetLocale}: \"{query}\"'}}";
+            return GetResponseFromOpenAI(query, createLocalizedQueryRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
+        }
+
         private OpenAIResponse? GetResponseFromOpenAI(string content, Func<string, string> getPrompt)
         { 
             try
@@ -179,6 +185,31 @@ namespace PICSeL.Utils
                             role = "system",
                             content = "You are an assistant content editor. Your responsibility is to summarize answer in a way that can help the creator create a short content video of around 0-2 minutes from your response."
                         },
+                        new Message
+                        {
+                            role = "user",
+                            content = query
+                        },
+                    }
+            };
+
+            return JsonConvert.SerializeObject(aiRequest);
+        }
+
+        private static string createLocalizedQueryRequest(string query)
+        {
+
+            OpenAIRequest aiRequest = new OpenAIRequest
+            {
+                temperature = 0.5,
+                top_p = 0.5,
+                frequency_penalty = 0.3,
+                presence_penalty = 0.3,
+                max_tokens = 4096,
+                stop = null,
+                stream = false,
+                messages = new List<Message>
+                    {
                         new Message
                         {
                             role = "user",
