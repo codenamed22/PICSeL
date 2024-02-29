@@ -31,7 +31,7 @@ namespace PICSeL.Controllers
         }
 
         [HttpGet("GetVideoForTopic")]
-        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName, bool isQuery=false) 
+        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName)
         {
             await createScriptAndVideoAsync(topicName);
             var ssml = _azureAIHelper.GetSSMLFromScript(script);
@@ -84,26 +84,6 @@ namespace PICSeL.Controllers
                 }
             }
 
-            throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
-        }
-
-        [HttpGet("GetTextAnswerForQuery")]
-        public async Task<string> GetTextAnswerForQuery(string query, string targetLocale = "", string sourceLocale ="en-US")
-        {
-            try
-            {
-                var script = _azureAIHelper.GetQueryAnswer(query);
-                //Convert it to desired locale
-                if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en")
-                    script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale, sourceLocale);
-
-                return script;
-            }
-            catch (Exception e)
-            {
-                throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
-            }
-            
             throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
 
