@@ -32,7 +32,7 @@ namespace PICSeL.Utils
                     response = GetResponseFromOpenAI(item, GetImagePrompt)?.Data?.FirstOrDefault();
                 }
                 
-                images.Add(Path.Combine(Directory.GetCurrentDirectory(), $"{count++}.jpeg"), response?.Url ?? string.Empty);
+                images.Add(Path.Combine(Directory.GetCurrentDirectory(), $"{++count}.jpeg"), response?.Url ?? string.Empty);
             }
 
             return images;

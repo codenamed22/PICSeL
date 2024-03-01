@@ -18,19 +18,19 @@ namespace PICSeL.Utils
             _logger = logger;
         }       
 
-        public string GetSumamryFromDocuments(string message, string lang = "EN")
+        public string GetSumamryFromDocuments(string message)
         {
-            return GetResponseFromOpenAI(message, createSummarizeRequest, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
+            return GetResponseFromOpenAI(message, createSummarizeRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
         public string GetVideoScript(string message)
         {
-            return GetResponseFromOpenAI(message, CreateVideoScript, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
+            return GetResponseFromOpenAI(message, CreateVideoScript)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        public string GetSSMLFromScript(string message, string lang = "EN")
+        public string GetSSMLFromScript(string message)
         {
-            return GetResponseFromOpenAI(message, CreateSSMLRequest, lang)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
+            return GetResponseFromOpenAI(message, CreateSSMLRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
         public string GetQueryAnswer(string query)
@@ -55,7 +55,7 @@ namespace PICSeL.Utils
 
                 var request = new HttpRequestMessage(HttpMethod.Post, _openAIConfig.Uri)
                 {
-                    Content = new StringContent(getPrompt(content, lang), Encoding.UTF8, "application/json")
+                    Content = new StringContent(getPrompt(content), Encoding.UTF8, "application/json")
                 };
 
                 request.Headers.Add("Accept", "application/json");
@@ -87,7 +87,7 @@ namespace PICSeL.Utils
 
                     var backupRequest = new HttpRequestMessage(HttpMethod.Post, _openAIConfig.BackupUri)
                     {
-                        Content = new StringContent(getPrompt(content, lang), Encoding.UTF8, "application/json")
+                        Content = new StringContent(getPrompt(content), Encoding.UTF8, "application/json")
                     };
 
                     backupRequest.Headers.Add("Accept", "application/json");
@@ -135,7 +135,7 @@ namespace PICSeL.Utils
 
         }
 
-        private static string createSummarizeRequest(string details, string lang = "EN")
+        private static string createSummarizeRequest(string details)
         {
 
             OpenAIRequest aiRequest = new OpenAIRequest
@@ -270,8 +270,6 @@ namespace PICSeL.Utils
                     }
             };
 
-            string language = lang == "EN" ? "english" : "hindi";
-
             aiRequest.messages.Add(new Message
             {
                 role = "user",
@@ -281,7 +279,7 @@ namespace PICSeL.Utils
             return JsonConvert.SerializeObject(aiRequest);
         }
 
-        private static string CreateVideoScript(string topic, string lang = "EN")
+        private static string CreateVideoScript(string topic)
         {
             var trainingScript1 = "Write a script for the solar system";
 
@@ -343,8 +341,6 @@ namespace PICSeL.Utils
                         }
                     }
             };
-
-            string language = lang == "EN" ? "english" : "hindi";
 
             aiRequest.messages.Add(new Message
             {

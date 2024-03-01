@@ -148,7 +148,7 @@ namespace PICSeL.Controllers
 
             var avatarResponse = GetAvatarVideoAsync(ssml).Result;
 
-            int durationPerImage = (TimeSpan.FromTicks(avatarResponse.Properties.DurationInTicks).Seconds) / numOfImages;
+            int durationPerImage = convertDuration(avatarResponse.Properties.Duration) / numOfImages;
 
             var avatarVideoName = $"{Guid.NewGuid()}.mp4";
             await DownloadImageFromSasUriAsync(avatarResponse.Outputs.Result, Path.Combine(Directory.GetCurrentDirectory(), avatarVideoName));
@@ -296,6 +296,34 @@ namespace PICSeL.Controllers
             ExecuteFfMpegCommand($"-i \"{inputFilePath}\" -codec: copy -start_number 0 -hls_time 10 -hls_list_size 0 -f hls \"{outputDirectory}\"");
         }
 
+        private int convertDuration(string duration)
+        {
+            // Use a regular expression to extract minutes and seconds
+            var match = Regex.Match(duration, @"PT(\d+)M(\d+(\.\d+)?)S");
+
+            if (match.Success)
+            {
+                // Extract minutes and seconds from the duration string
+                int minutes = int.Parse(match.Groups[1].Value);
+                double seconds = double.Parse(match.Groups[2].Value);
+
+                // Convert the entire duration to seconds
+                double totalSeconds = minutes * 60 + seconds;
+
+                return (int)Math.Ceiling(totalSeconds);
+                
+            }
+            else
+            {
+                Console.WriteLine("The format of the input string is incorrect.");
+                return 150;
+            }
+        }
+
+        [HttpGet("GetVideoForQuery")]
+        public async Task<VideoContentResponse> GetVideoForQuery([FromQuery] string query) 
+        {
+            var script = _azureAIHelper.GetQueryAnswer(query);
 
     }
 }
