@@ -33,10 +33,15 @@ namespace PICSeL.Utils
             return GetResponseFromOpenAI(message, CreateSSMLRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
 
-        public string GetQueryAnswer(string query)
+        public string GetQueryAnswer(string query, string context)
         {
-            return GetResponseFromOpenAI(query, createQueryRequest)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
+            var request = new HttpRequestMessage(HttpMethod.Post, _openAIConfig.Uri)
+            {
+                Content = new StringContent(createQueryRequest(query, context), Encoding.UTF8, "application/json")
+            };
+            return GetResponseFromOpenAI(request)?.Choices?.FirstOrDefault()?.Message.content ?? string.Empty;
         }
+
 
         public string GetLocalizedAnswerForQuery(string query, string targetLocale, string sourceLocale)
         {
@@ -135,6 +140,92 @@ namespace PICSeL.Utils
 
         }
 
+        private OpenAIResponse? GetResponseFromOpenAI(HttpRequestMessage request)
+        {
+            try
+            {
+
+                var client = new HttpClient();
+
+                client.DefaultRequestHeaders.Add("api-key", _openAIConfig.ApiKey);
+
+                request.Headers.Add("Accept", "application/json");
+                request.Headers.Add("Accept-Encoding", "gzip, deflate, br");
+                request.Headers.Add("Connection", "keep-alive");
+
+                // Send the request and get the response
+                var response = client.SendAsync(request).Result;
+
+                if (response.IsSuccessStatusCode)
+                {
+                    // Read the response content as a string
+                    string jsonResponse = response.Content.ReadAsStringAsync().Result;
+
+                    // Deserialize the JSON response into an OpenAiResponse object
+                    OpenAIResponse openAiResponse = JsonConvert.DeserializeObject<OpenAIResponse>(jsonResponse);
+
+                    openAiResponse.Status = response.StatusCode;
+
+                    return openAiResponse;
+                }
+
+                //Fallback to backupModel
+                if (response.StatusCode == HttpStatusCode.TooManyRequests)
+                {
+                    var clientBackup = new HttpClient();
+
+                    clientBackup.DefaultRequestHeaders.Add("api-key", _openAIConfig.ApiKeyBackup);
+
+                    var backupRequest = new HttpRequestMessage(HttpMethod.Post, _openAIConfig.BackupUri)
+                    {
+                        Content = request.Content
+                    };
+
+                    backupRequest.Headers.Add("Accept", "application/json");
+                    backupRequest.Headers.Add("Accept-Encoding", "gzip, deflate, br");
+                    backupRequest.Headers.Add("Connection", "keep-alive");
+
+                    // Send the request and get the response
+                    var backupResponse = clientBackup.SendAsync(backupRequest).Result;
+
+                    if (backupResponse.IsSuccessStatusCode)
+                    {
+                        // Read the response content as a string
+                        string jsonResponse = backupResponse.Content.ReadAsStringAsync().Result;
+
+                        // Deserialize the JSON response into an OpenAiResponse object
+                        OpenAIResponse openAiResponse = JsonConvert.DeserializeObject<OpenAIResponse>(jsonResponse);
+
+                        openAiResponse.Status = backupResponse.StatusCode;
+
+                        clientBackup.Dispose();
+
+                        return openAiResponse;
+                    }
+
+                    return new OpenAIResponse()
+                    {
+                        Status = backupResponse.StatusCode,
+                    };
+
+                }
+
+                return new OpenAIResponse()
+                {
+                    Status = response.StatusCode,
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex.Message);
+                return new OpenAIResponse()
+                {
+                    Status = HttpStatusCode.InternalServerError,
+                };
+            }
+
+        }
+
         private static string createSummarizeRequest(string details)
         {
 
@@ -166,7 +257,7 @@ namespace PICSeL.Utils
             return JsonConvert.SerializeObject(aiRequest);
         }
 
-        private static string createQueryRequest(string query)
+        private static string createQueryRequest(string query, string context)
         {
 
             OpenAIRequest aiRequest = new OpenAIRequest
@@ -183,7 +274,12 @@ namespace PICSeL.Utils
                         new Message
                         {
                             role = "system",
-                            content = "You are an assistant content editor. Your responsibility is to summarize answer in a way that can help the creator create a short content video of around 0-1 minute from your response."
+                            content = "You are an assistant content editor. Your responsibility is to get context and train from context and then summarize answer in a way that can help the creator create a short content video of around 0-1 minute from your response."
+                        },
+                        new Message
+                        {
+                            role="system",
+                            content = "Here is the context you need to train from: " + context
                         },
                         new Message
                         {
