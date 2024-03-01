@@ -1,8 +1,14 @@
-﻿using Azure.Storage.Blobs;
+﻿using Azure;
+using Azure.Identity;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Azure.Storage.Files.Shares;
+using Azure.Storage.Files.Shares.Models;
+using Azure.Storage.Sas;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using PICSeL.Configs;
 using PICSeL.Models;
 using PICSeL.Utils;
 using System;
@@ -21,21 +27,21 @@ namespace PICSeL.Controllers
         private readonly AzureAIHelper _azureAIHelper;
         private readonly AzureSpeechHelper _azureSpeechHelper;
         private readonly DallEHelper _dallEHelper;
+        private readonly BlobConfig _blobConfig;
 
-        public VideoCreatorController(AzureAIHelper azureAIHelper, AzureSpeechHelper azureSpeechHelper, DallEHelper dallEHelper, ILogger<VideoCreatorController> logger)
+        public VideoCreatorController(AzureAIHelper azureAIHelper, AzureSpeechHelper azureSpeechHelper, DallEHelper dallEHelper, ILogger<VideoCreatorController> logger, IOptions<BlobConfig> blobConfig)
         {
             _logger = logger;
             _azureAIHelper = azureAIHelper;
             _azureSpeechHelper = azureSpeechHelper;
             _dallEHelper = dallEHelper;
+            _blobConfig = blobConfig.Value;
         }
 
         [HttpGet("GetVideoForTopic")]
         public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName)
         {
-            await createScriptAndVideoAsync(topicName);
-
-            return new VideoContentResponse();
+            return await createScriptAndVideoAsync(topicName, Guid.NewGuid().ToString());
 
             //throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
@@ -64,19 +70,21 @@ namespace PICSeL.Controllers
             }
 
             var summaryOfText = _azureAIHelper.GetSumamryFromDocuments(fileContents);
-            await createScriptAndVideoAsync(summaryOfText);
+            await createScriptAndVideoAsync(summaryOfText, Guid.NewGuid().ToString());
 
             return new VideoContentResponse();
 
             //throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
 
-        private async Task createScriptAndVideoAsync(string finalContent)
+        private async Task<VideoContentResponse> createScriptAndVideoAsync(string finalContent, string projectGuid)
         {
             var script = _azureAIHelper.GetVideoScript(finalContent);
 
+            Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), projectGuid));
+
             IList<string> visuals = ExtractVisuals(script);
-            var images = _dallEHelper.GetImages(visuals);
+            var images = _dallEHelper.GetImages(visuals, projectGuid);
 
             foreach (var item in images)
             {
@@ -104,8 +112,13 @@ namespace PICSeL.Controllers
             int durationPerImage = convertDuration(avatarResponse.Properties.Duration) / numOfImages;
 
             var avatarVideoName = $"{Guid.NewGuid()}.mp4";
-            await DownloadImageFromSasUriAsync(avatarResponse.Outputs.Result, Path.Combine(Directory.GetCurrentDirectory(), avatarVideoName));
-            CreateImageVideo(images, avatarVideoName, durationPerImage);
+            await DownloadImageFromSasUriAsync(avatarResponse.Outputs.Result, Path.Combine(Directory.GetCurrentDirectory(), projectGuid, avatarVideoName));
+            var sas = await CreateImageVideo(images, avatarVideoName, durationPerImage, projectGuid);
+
+            avatarResponse.Outputs.Result = sas;
+
+            Directory.Delete(Path.Combine(Directory.GetCurrentDirectory(), projectGuid), true);
+            return avatarResponse;
         }
 
         private async Task<VideoContentResponse> GetAvatarVideoAsync(string ssml)
@@ -164,7 +177,7 @@ namespace PICSeL.Controllers
             }
         }
 
-        private async Task CreateImageVideo(Dictionary<string,string> images, string avatarVideoName, int durationPerImage)
+        private async Task<string> CreateImageVideo(Dictionary<string,string> images, string avatarVideoName, int durationPerImage, string projectGuid)
         {
             durationPerImage = durationPerImage == 0 ? 13 : durationPerImage;
             // After downloading images
@@ -177,6 +190,7 @@ namespace PICSeL.Controllers
                 }
                 string imageFilePath = item.Key.Replace("\\", "/"); // The path where the image is saved
                 string videoFilePath = Path.ChangeExtension(imageFilePath, ".mp4");
+                System.IO.File.Delete(videoFilePath);
                 videoFiles.Add(videoFilePath);
 
                 ExecuteFfMpegCommand($" -loop 1 -i \"{imageFilePath}\" -c:v libx264 -t {durationPerImage} -pix_fmt yuv420p -vf \"scale=1920:1080\" \"{videoFilePath}\"");
@@ -193,23 +207,37 @@ namespace PICSeL.Controllers
                 }
             }
 
-            ExecuteFfMpegCommand($"-f concat -safe 0 -i {fileListPath} -c copy outputTemp.mp4");
+            var outputTempPath = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"outputTemp.mp4");
+            outputTempPath = outputTempPath.Replace("\\", "/");
 
-            var input1 = Path.Combine(Directory.GetCurrentDirectory(), $"{avatarVideoName}");
-            var input2 = Path.Combine(Directory.GetCurrentDirectory(), $"outputTemp.mp4");
+            ExecuteFfMpegCommand($"-f concat -safe 0 -i {fileListPath} -c copy \"{outputTempPath}\"");
+
+            var input1 = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}");
+            var input2 = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"outputTemp.mp4");
             input1 = input1.Replace("\\", "/");
             input2 = input2.Replace("\\", "/");
             ////ExecuteFfMpegCommand($"-i \"{input1}\" -i \"{input2}\" -filter_complex \"[1:v]scale=320:-1[ovrl]; [0:v][ovrl]overlay=W-w-10:10\" -codec:a copy output_pip.mp4"); PIP
+            ///
+            var outPutFinalpath = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}_side_by_side.mp4");
+            outPutFinalpath = outPutFinalpath.Replace("\\", "/");
 
             // For Side-by-Side
-            ExecuteFfMpegCommand($"-i \"{input1}\" -i \"{input2}\" -filter_complex \"[0:v][1:v]scale2ref=h=ih/1:w=iw/1[main][pip];[main][pip]hstack\" -codec:a copy {avatarVideoName}_side_by_side.mp4");
+            ExecuteFfMpegCommand($"-i \"{input1}\" -i \"{input2}\" -filter_complex \"[0:v][1:v]scale2ref=h=ih/1:w=iw/1[main][pip];[main][pip]hstack\" -codec:a copy \"{outPutFinalpath}\"");
 
-            var output_video = Path.Combine(Directory.GetCurrentDirectory(), $"{avatarVideoName}_side_by_side.mp4");
-            var output_video2 = Path.Combine(Directory.GetCurrentDirectory(), $"{avatarVideoName}_side_by_side_streamable.m3u8");
+            var output_video = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}_side_by_side.mp4");
+            var output_video2 = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}_side_by_side_streamable.m3u8");
+
+            output_video = output_video.Replace("\\", "/");
+            output_video2 = output_video2.Replace("\\", "/");
+
             ConvertMp4ToHls(output_video, output_video2);
+
+            var sas = await uploadToBlobAsync(output_video, avatarVideoName);
 
             System.IO.File.Delete(input1);
             System.IO.File.Delete(input2);
+
+            return sas;
 
         }
 
@@ -271,6 +299,45 @@ namespace PICSeL.Controllers
                 Console.WriteLine("The format of the input string is incorrect.");
                 return 150;
             }
+        }
+
+        private async Task<string> uploadToBlobAsync(string path, string fileName)
+        {
+            string shareEndpoint = "https://naanantestpicsel.file.core.windows.net";
+            string shareName = "picsel-content";
+            string folderName = "picsel";
+
+            var shareClient = new ShareClient(_blobConfig.ConnectionString, shareName);
+
+            // Get a reference to the directory
+            var directoryClient = shareClient.GetDirectoryClient(folderName);
+
+            // Ensure the directory exists
+            await directoryClient.CreateIfNotExistsAsync();
+
+            // Get a reference to the file client
+            var fileClient = directoryClient.GetFileClient(fileName);
+
+
+            // Open the file and upload its data
+            const long chunkSize = 4 * 1024 * 1024; // 4 MiB, Azure's maximum range size
+            using var stream = System.IO.File.OpenRead(path);
+            long fileSize = stream.Length;
+
+            await fileClient.CreateAsync(fileSize);
+
+            long offset = 0;
+            byte[] buffer = new byte[chunkSize];
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+            {
+                using MemoryStream ms = new MemoryStream(buffer, 0, bytesRead);
+                await fileClient.UploadRangeAsync(new HttpRange(offset, bytesRead), ms);
+                offset += bytesRead;
+            }
+
+            // Assuming _blobConfig.SasKey is a SAS token with permissions to access the file
+            return $"{shareEndpoint}/{shareName}/{folderName}/{fileName}?{_blobConfig.SasKey}";
         }
 
         [HttpGet("GetVideoForQuery")]

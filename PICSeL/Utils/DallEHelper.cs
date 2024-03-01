@@ -17,7 +17,7 @@ namespace PICSeL.Utils
             _logger = logger;
         }
 
-        public Dictionary<string, string> GetImages(IList<string> message)
+        public Dictionary<string, string> GetImages(IList<string> message, string projectGuid)
         {
             Dictionary<string, string> images = new Dictionary<string, string>();
             int count = 0;
@@ -32,7 +32,7 @@ namespace PICSeL.Utils
                     response = GetResponseFromOpenAI(item, GetImagePrompt)?.Data?.FirstOrDefault();
                 }
                 
-                images.Add(Path.Combine(Directory.GetCurrentDirectory(), $"{++count}.jpeg"), response?.Url ?? string.Empty);
+                images.Add(Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{++count}.jpeg"), response?.Url ?? string.Empty);
             }
 
             return images;
