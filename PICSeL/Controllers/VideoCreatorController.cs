@@ -341,9 +341,29 @@ namespace PICSeL.Controllers
         }
 
         [HttpGet("GetVideoForQuery")]
-        public async Task<VideoContentResponse> GetVideoForQuery([FromQuery] string query) 
+        public async Task<VideoContentResponse> GetVideoForQuery([FromQuery] string query, string fileSasUrl)
         {
-            var script = _azureAIHelper.GetQueryAnswer(query);
+            string fileContents = "";
+            try
+            {
+                using (HttpClient httpClient = new HttpClient())
+                {
+                    try
+                    {
+                        fileContents = await httpClient.GetStringAsync(fileSasUrl);
+                    }
+                    catch (HttpRequestException e)
+                    {
+                        Console.WriteLine($"Error retrieving file: {e.Message}");
+                    }
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                throw new HttpRequestException("File couldnt be read from the link, please check the link", e, HttpStatusCode.ServiceUnavailable);
+            }
+
+            var script = _azureAIHelper.GetQueryAnswer(query, fileContents);
 
             var ssml = _azureAIHelper.GetSSMLFromScript(script);
             ssml = ssml.Replace("```", "");
@@ -374,13 +394,33 @@ namespace PICSeL.Controllers
         }
 
         [HttpGet("GetTextAnswerForQuery")]
-        public async Task<string> GetTextAnswerForQuery(string query, string targetLocale = "", string sourceLocale ="en-US")
+        public async Task<string> GetTextAnswerForQuery(string query, string fileSasUrl, string targetLocale = "", string sourceLocale = "en-US")
         {
             try
             {
-                var script = _azureAIHelper.GetQueryAnswer(query);
+                string fileContents = "";
+                try
+                {
+                    using (HttpClient httpClient = new HttpClient())
+                    {
+                        try
+                        {
+                            fileContents = await httpClient.GetStringAsync(fileSasUrl);
+                        }
+                        catch (HttpRequestException e)
+                        {
+                            Console.WriteLine($"Error retrieving file: {e.Message}");
+                        }
+                    }
+                }
+                catch (HttpRequestException e)
+                {
+                    throw new HttpRequestException("File couldnt be read from the link, please check the link", e, HttpStatusCode.ServiceUnavailable);
+                }
+
+                var script = _azureAIHelper.GetQueryAnswer(query, fileContents);
                 //Convert it to desired locale
-                if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en")
+                if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en-US")
                     script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale, sourceLocale);
 
                 return script;
@@ -389,8 +429,52 @@ namespace PICSeL.Controllers
             {
                 throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
             }
-            
+
             throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
+        }
+
+        [HttpGet("GetVideoForQueryTopic")]
+        public async Task<VideoContentResponse> GetVideoForQueryTopic([FromQuery] string query, string topicName)
+        {
+            var script = _azureAIHelper.GetQueryAnswer(query, topicName);
+
+            var ssml = _azureAIHelper.GetSSMLFromScript(script);
+            ssml = ssml.Replace("```", "");
+
+            var jobId = await _azureSpeechHelper.SubmitSynthesisAsync(ssml);
+            if (!string.IsNullOrEmpty(jobId))
+            {
+                while (true)
+                {
+                    var jobResponse = await _azureSpeechHelper.GetSynthesisAsync(jobId);
+                    if (jobResponse.Status == "Succeeded")
+                    {
+                        return jobResponse;
+                    }
+                    if (jobResponse.Status == "Failed")
+                    {
+                        throw new HttpRequestException($"Batch avatar synthesis job failed");
+                    }
+                    else
+                    {
+                        _logger.LogTrace($"Batch avatar synthesis job is still running, status");
+                        await Task.Delay(5000); // Wait for 5 seconds before polling again
+                    }
+                }
+            }
+
+            throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
+        }
+
+        [HttpGet("GetTextAnswerForQueryTopic")]
+        public async Task<string> GetTextAnswerForQueryTopic(string query, string topicName, string targetLocale = "", string sourceLocale = "en-US")
+        {
+            var script = _azureAIHelper.GetQueryAnswer(query, topicName);
+            //Convert it to desired locale
+            if (!string.IsNullOrEmpty(targetLocale) && targetLocale != "en-US")
+                script = _azureAIHelper.GetLocalizedAnswerForQuery(script, targetLocale, sourceLocale);
+
+            return script;
         }
     }
 }
