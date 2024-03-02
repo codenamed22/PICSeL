@@ -5,6 +5,7 @@ using Azure.Storage.Blobs.Models;
 using Azure.Storage.Files.Shares;
 using Azure.Storage.Files.Shares.Models;
 using Azure.Storage.Sas;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,6 +18,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using static System.Net.WebRequestMethods;
+using Flurl.Http;
 
 namespace PICSeL.Controllers
 {
@@ -29,14 +31,16 @@ namespace PICSeL.Controllers
         private readonly AzureSpeechHelper _azureSpeechHelper;
         private readonly DallEHelper _dallEHelper;
         private readonly BlobConfig _blobConfig;
+        private readonly AzureSpeechServiceConfig _speechServiceConfig;
 
-        public VideoCreatorController(AzureAIHelper azureAIHelper, AzureSpeechHelper azureSpeechHelper, DallEHelper dallEHelper, ILogger<VideoCreatorController> logger, IOptions<BlobConfig> blobConfig)
+        public VideoCreatorController(AzureAIHelper azureAIHelper, AzureSpeechHelper azureSpeechHelper, DallEHelper dallEHelper, ILogger<VideoCreatorController> logger, IOptions<BlobConfig> blobConfig, IOptions<AzureSpeechServiceConfig> speechConfig)
         {
             _logger = logger;
             _azureAIHelper = azureAIHelper;
             _azureSpeechHelper = azureSpeechHelper;
             _dallEHelper = dallEHelper;
             _blobConfig = blobConfig.Value;
+            _speechServiceConfig = speechConfig.Value;
         }
 
         [HttpGet("GetVideoForTopic")]
@@ -91,6 +95,99 @@ namespace PICSeL.Controllers
             {
                 throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
             }
+        }
+
+        [HttpPost("UploadAndTranslateVideo")]
+        public async Task<Response> UploadAndTranslateVideo(string videoBlobUri, string inputLocale, string targetLocale)
+        {
+            if (string.IsNullOrWhiteSpace(videoBlobUri) || targetLocale == null)
+            {
+                throw new HttpRequestException("Invalid parameter", new InvalidOperationException("Invalid parameter"), HttpStatusCode.BadRequest);
+            }
+            try
+            {
+                using (WebClient webClient = new WebClient())
+                {
+                    var tempFilePath = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".mp4");
+
+                    webClient.DownloadFile(videoBlobUri, tempFilePath);
+                    var uploadUri = new Uri("https://eastus.customvoice.api.speech.microsoft.com/api/videotranslation/videofiles?api-version=2023-04-01-preview")
+                                    .WithHeader("Ocp-Apim-Subscription-Key", _speechServiceConfig.ApiKey);
+
+                    var request = uploadUri.PostMultipartAsync(mp =>
+                    {
+                        mp.AddString("displayName", "test");
+                        mp.AddString("locale", inputLocale);
+                        mp.AddFile("videoFile", tempFilePath);
+                    });
+                    var response = await request.ReceiveJson<UploadResponse>();
+                    var fileId = response.Self.Segments.Last();
+
+                    var translateUri = new Uri("https://eastus.customvoice.api.speech.microsoft.com/api/videotranslation/videotranslations?api-version=2023-04-01-preview")
+                    .WithHeader("Ocp-Apim-Subscription-Key", _speechServiceConfig.ApiKey);
+
+                    var translateRequest = translateUri.PostMultipartAsync(mp =>
+                    {
+                        mp.AddString("DisplayName", "test");
+                        mp.AddString("VideoFileId", fileId.ToString());
+                        mp.AddString("AudioAlignKind", "SpeedUpOrSlowDownToMatch");
+                        mp.AddString("TargetLocalesJsonString", targetLocale);
+                        mp.AddString("EnableFeatures", "FpieBackgroundAudioExtraction,TryPunctuationPauseForTooSlowSegments,TryGreedyAudioAlignment,GptTextReformulation");
+                    });
+
+                    var translationResponse = await translateRequest.ReceiveJson<TranslateResponse>().ConfigureAwait(false);
+                    var translationId = translationResponse.Self.Segments.Last();
+                    var status = "";
+                    QueryResponse statusResponse;
+                    do
+                    {
+                        await Task.Delay(10000);
+                        var fetchUri = new Uri("https://eastus.customvoice.api.speech.microsoft.com/api/videotranslation/videotranslations/" + translationId + "?api-version=2023-04-01-preview")
+                                               .WithHeader("Ocp-Apim-Subscription-Key", _speechServiceConfig.ApiKey);
+
+                        statusResponse = await fetchUri.GetAsync().ReceiveJson<QueryResponse>().ConfigureAwait(false);
+                        status = statusResponse.Status;
+                    }
+                    while (status == "Running" || status == "NotStarted");
+
+                    if (status == "Succeeded")
+                    {
+                        statusResponse.TargetLocales.FirstOrDefault().Value.TryGetValue("outputVideoFileUrl", out string translatedUri);
+                        return new Response() { StatusCode = HttpStatusCode.OK, Uri = translatedUri };
+                    }
+                    else
+                    {
+                        return new Response() { StatusCode = HttpStatusCode.InternalServerError, Uri = "" };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again" + ex.Message), HttpStatusCode.InternalServerError);
+            }
+        }
+
+        private class UploadResponse
+        {
+            public Uri Self { get; set; }
+        }
+
+        private class TranslateResponse
+        {
+            public Uri Self { get; set; }
+            public Guid VideoFileId { get; set; }
+        }
+
+        private class QueryResponse
+        {
+            public Dictionary<string, Dictionary<string, string>> TargetLocales { get; set; }
+            public string Status { get; set; }
+        }
+
+        public class Response
+        {
+            public HttpStatusCode StatusCode { get; set; }
+            public string Uri { get; set; }
         }
 
         private async Task<VideoContentResponse> createScriptAndVideoAsync(string finalContent, string projectGuid)

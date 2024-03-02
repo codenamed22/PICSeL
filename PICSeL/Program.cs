@@ -19,6 +19,7 @@ builder.Configuration["AzureAvatarConfig:SubscriptionKey"] = kvConnector.GetSecr
 builder.Configuration["DallEConfig:ApiKey"] = kvConnector.GetSecretAsync($"DallEConfig--ApiKey").GetAwaiter().GetResult().Value.Value;
 builder.Configuration["BlobConfig:SasKey"] = kvConnector.GetSecretAsync($"SasKey").GetAwaiter().GetResult().Value.Value;
 builder.Configuration["BlobConfig:ConnectionString"] = kvConnector.GetSecretAsync($"ConnectionString").GetAwaiter().GetResult().Value.Value;
+builder.Configuration["AzureSpeechServiceConfig:ApiKey"] = kvConnector.GetSecretAsync($"AzureSpeechServiceConfig--ApiKey").GetAwaiter().GetResult().Value.Value;
 
 builder.Services.Configure<OpenAIConfig>(builder.Configuration.GetSection("OpenAIConfig"));
 builder.Services.Configure<AzureAvatarConfig>(builder.Configuration.GetSection("AzureAvatarConfig"));
