@@ -15,6 +15,7 @@ using System;
 using System.Diagnostics;
 using System.Net;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using static System.Net.WebRequestMethods;
 
 namespace PICSeL.Controllers
@@ -39,15 +40,24 @@ namespace PICSeL.Controllers
         }
 
         [HttpGet("GetVideoForTopic")]
-        public async Task<VideoContentResponse> GetVideoForTopic([FromQuery] string topicName)
+        public string GetVideoForTopic([FromQuery] string topicName)
         {
-            return await createScriptAndVideoAsync(topicName, Guid.NewGuid().ToString());
+            try
+            {
+                var jobId = Guid.NewGuid().ToString();
+                Task.Run(() => createScriptAndVideoAsync(topicName, jobId));
+                return jobId;
+            }
+            catch (Exception e)
+            {
+                throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
+            }
 
             //throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
         }
 
         [HttpGet("GetVideoForContentFile")]
-        public async Task<VideoContentResponse> GetVideoForContentFile([FromQuery] string fileSasUrl)
+        public async Task<string> GetVideoForContentFile([FromQuery] string fileSasUrl)
         {
             string fileContents = "";
             try
@@ -69,22 +79,32 @@ namespace PICSeL.Controllers
                 throw new HttpRequestException("File couldnt be read from the link, please check the link", e, HttpStatusCode.ServiceUnavailable);
             }
 
-            var summaryOfText = _azureAIHelper.GetSumamryFromDocuments(fileContents);
-            await createScriptAndVideoAsync(summaryOfText, Guid.NewGuid().ToString());
+            try
+            { 
+                var summaryOfText = _azureAIHelper.GetSumamryFromDocuments(fileContents);
 
-            return new VideoContentResponse();
-
-            //throw new HttpRequestException("Unexpected", new InvalidOperationException("Something went wrong please try again"), HttpStatusCode.ServiceUnavailable);
+                var jobId = Guid.NewGuid().ToString();
+                Task.Run(() => createScriptAndVideoAsync(summaryOfText, jobId));
+                return jobId;
+            }
+            catch (Exception e)
+            {
+                throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
+            }
         }
 
         private async Task<VideoContentResponse> createScriptAndVideoAsync(string finalContent, string projectGuid)
         {
             var script = _azureAIHelper.GetVideoScript(finalContent);
 
+            _logger.LogInformation($"Fetched script for job: {projectGuid}");
+
             Directory.CreateDirectory(Path.Combine(Directory.GetCurrentDirectory(), projectGuid));
 
             IList<string> visuals = ExtractVisuals(script);
             var images = _dallEHelper.GetImages(visuals, projectGuid);
+
+            _logger.LogInformation($"Fetched images for job: {projectGuid}");
 
             foreach (var item in images)
             {
@@ -98,6 +118,16 @@ namespace PICSeL.Controllers
                 ssml = ssml.Substring(4);
             }
 
+            try
+            { 
+                var x = XDocument.Parse(ssml);
+            }
+            catch (Exception e)
+            {
+                _logger.LogInformation($"SSML invalid for job: {projectGuid}");
+                throw new HttpRequestException("SSML is not valid", e, HttpStatusCode.ServiceUnavailable);
+            }
+
             int numOfImages = 0;
             foreach (var item in images)
             {
@@ -107,18 +137,27 @@ namespace PICSeL.Controllers
                 }
             }
 
-            var avatarResponse = GetAvatarVideoAsync(ssml).Result;
+            try
+            {
+                var avatarResponse = await GetAvatarVideoAsync(ssml);
 
-            int durationPerImage = convertDuration(avatarResponse.Properties.Duration) / numOfImages;
+                _logger.LogInformation($"Fetched avatar video for: {projectGuid}");
 
-            var avatarVideoName = $"{Guid.NewGuid()}.mp4";
-            await DownloadImageFromSasUriAsync(avatarResponse.Outputs.Result, Path.Combine(Directory.GetCurrentDirectory(), projectGuid, avatarVideoName));
-            var sas = await CreateImageVideo(images, avatarVideoName, durationPerImage, projectGuid);
+                int durationPerImage = convertDuration(avatarResponse.Properties.Duration) / numOfImages;
 
-            avatarResponse.Outputs.Result = sas;
+                var avatarVideoName = $"{projectGuid}.mp4";
+                await DownloadImageFromSasUriAsync(avatarResponse.Outputs.Result, Path.Combine(Directory.GetCurrentDirectory(), projectGuid, avatarVideoName));
+                var sas = await CreateImageVideo(images, avatarVideoName, durationPerImage, projectGuid);
 
-            Directory.Delete(Path.Combine(Directory.GetCurrentDirectory(), projectGuid), true);
-            return avatarResponse;
+                avatarResponse.Outputs.Result = sas;
+
+                Directory.Delete(Path.Combine(Directory.GetCurrentDirectory(), projectGuid), true);
+                return avatarResponse;
+            }
+            catch (Exception e)
+            {
+                throw new HttpRequestException("Unexpected", e, HttpStatusCode.ServiceUnavailable);
+            }
         }
 
         private async Task<VideoContentResponse> GetAvatarVideoAsync(string ssml)
@@ -197,6 +236,8 @@ namespace PICSeL.Controllers
                 System.IO.File.Delete(imageFilePath);
             }
 
+            _logger.LogInformation($"Created FFMPEG small videos for {projectGuid}");
+
             // Create the file list for concatenation
             string fileListPath = $"{avatarVideoName}file_list.txt";
             using (StreamWriter file = new StreamWriter(fileListPath))
@@ -212,6 +253,8 @@ namespace PICSeL.Controllers
 
             ExecuteFfMpegCommand($"-f concat -safe 0 -i {fileListPath} -c copy \"{outputTempPath}\"");
 
+            _logger.LogInformation($"Created FFMPEG image video full for {projectGuid}");
+
             var input1 = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}");
             var input2 = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"outputTemp.mp4");
             input1 = input1.Replace("\\", "/");
@@ -224,6 +267,8 @@ namespace PICSeL.Controllers
             // For Side-by-Side
             ExecuteFfMpegCommand($"-i \"{input1}\" -i \"{input2}\" -filter_complex \"[0:v][1:v]scale2ref=h=ih/1:w=iw/1[main][pip];[main][pip]hstack\" -codec:a copy \"{outPutFinalpath}\"");
 
+            _logger.LogInformation($"Created FFMPEG combined full video for {projectGuid}");
+
             var output_video = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}_side_by_side.mp4");
             var output_video2 = Path.Combine(Directory.GetCurrentDirectory(), projectGuid, $"{avatarVideoName}_side_by_side_streamable.m3u8");
 
@@ -232,13 +277,45 @@ namespace PICSeL.Controllers
 
             ConvertMp4ToHls(output_video, output_video2);
 
-            var sas = await uploadToBlobAsync(output_video, avatarVideoName);
+            var sasUrls = await UploadMatchingFilesToBlobAsync(Path.Combine(Directory.GetCurrentDirectory(), projectGuid), avatarVideoName);
+
+            //var sas = await UploadToBlobAsync(output_video, avatarVideoName);
+
+            _logger.LogInformation($"Uploaded sas for {projectGuid}");
 
             System.IO.File.Delete(input1);
             System.IO.File.Delete(input2);
 
-            return sas;
+            return sasUrls.First();
 
+        }
+
+        private async Task<List<string>> UploadMatchingFilesToBlobAsync(string directoryPath, string filePrefix)
+        {
+            List<string> sasUrls = new List<string>();
+
+            // Ensure the directory exists
+            if (!Directory.Exists(directoryPath))
+            {
+                Console.WriteLine($"Directory does not exist: {directoryPath}");
+                return sasUrls;
+            }
+
+            // Search for files matching the pattern
+            string searchPattern = $"{filePrefix}_side_by_side_streamable*";
+            string[] files = Directory.GetFiles(directoryPath, searchPattern);
+
+            foreach (string filePath in files)
+            {
+                var filePathLocal = filePath.Replace("\\", "/");
+                string fileName = Path.GetFileName(filePathLocal);
+                // Assuming UploadToBlobAsync is implemented to upload the file and return a SAS URL
+                string sasUrl = await UploadToBlobAsync(filePathLocal, fileName);
+                sasUrls.Add(sasUrl);
+                Console.WriteLine($"Uploaded {fileName} and obtained SAS URL: {sasUrl}");
+            }
+
+            return sasUrls;
         }
 
         private void ExecuteFfMpegCommand(string arguments)
@@ -301,7 +378,7 @@ namespace PICSeL.Controllers
             }
         }
 
-        private async Task<string> uploadToBlobAsync(string path, string fileName)
+        private async Task<string> uploadToFileShareAsync(string path, string fileName)
         {
             string shareEndpoint = "https://naanantestpicsel.file.core.windows.net";
             string shareName = "picsel-content";
@@ -338,6 +415,33 @@ namespace PICSeL.Controllers
 
             // Assuming _blobConfig.SasKey is a SAS token with permissions to access the file
             return $"{shareEndpoint}/{shareName}/{folderName}/{fileName}?{_blobConfig.SasKey}";
+        }
+
+        private async Task<string> UploadToBlobAsync(string path, string fileName)
+        {
+            string blobServiceEndpoint = "https://naanantestpicsel.blob.core.windows.net";
+            string containerName = "picsel-test-blob";
+
+            // Initialize the BlobServiceClient with your connection string
+            var blobServiceClient = new BlobServiceClient(_blobConfig.ConnectionString);
+
+            // Get a reference to the container
+            var blobContainerClient = blobServiceClient.GetBlobContainerClient(containerName);
+
+            // Ensure the container exists
+            await blobContainerClient.CreateIfNotExistsAsync();
+
+            // Get a reference to the blob client
+            var blobClient = blobContainerClient.GetBlobClient(fileName);
+
+            // Open the file and upload its data to the blob
+            using var uploadFileStream = System.IO.File.OpenRead(path);
+            await blobClient.UploadAsync(uploadFileStream, overwrite: true);
+            uploadFileStream.Close();
+
+            // Assuming _blobConfig.SasKey is a SAS token with permissions to access the blob
+            // Note: This assumes the SAS token is for blob access. Ensure your SAS token is appropriate for the operation.
+            return $"{blobClient.Uri}?{_blobConfig.SasKey}";
         }
 
         [HttpGet("GetVideoForQuery")]

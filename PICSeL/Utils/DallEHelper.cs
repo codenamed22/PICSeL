@@ -28,7 +28,7 @@ namespace PICSeL.Utils
                 if(response?.Url == null)
                 {
                     _logger.LogError($"Failed to get image for {item}, will retry");
-                    Thread.Sleep(10000);
+                    //Thread.Sleep(10000);
                     response = GetResponseFromOpenAI(item, GetImagePrompt)?.Data?.FirstOrDefault();
                 }
                 
